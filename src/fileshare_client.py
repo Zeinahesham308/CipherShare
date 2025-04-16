@@ -48,9 +48,9 @@ class FileShareClient:
         counter=0
         with open(filepath, 'rb') as f:
             while chunk := f.read(1024):
-                print("send")
-                print (counter)
-                counter+=1
+                # print("send")
+                # print (counter)
+                # counter+=1
                 self.client_socket.send(chunk)
         self.client_socket.send(b"END_OF_FILE")
         received_message=self.client_socket.recv(1024).decode()
@@ -91,19 +91,19 @@ class FileShareClient:
         result = self.client_socket.recv(4096).decode()
 
         print("\n Search Results:")
-        if result.strip() == "":
+        if result == "EMPTY":
             print("No files matched your search.")
         else:
             for file in result.strip().split("\n"):
                 print(f" {file}")
-        pass
+
 
     def list_shared_files(self):
             # ... (Keep track of locally shared files and display them)
             self.client_socket.send("LIST".encode())
             file_list = self.client_socket.recv(4096).decode()
             print("\n Shared Files:")
-            if file_list.strip() == "":
+            if file_list == "NOFILES":
                 print("No files are currently shared.")
             else:
                 for file in file_list.strip().split("\n"):
@@ -122,25 +122,33 @@ def main():
     choice=''
     while choice != 0:
 
-        print("Choose 1 for uploading a file , 2 for downloading a file , 3 for listing all files and 4 for searching")
+        print("Choose 1 for uploading a file , 2 for downloading a file , 3 for listing all files and 4 for searching and 88 to end")
         choice=int(input())
         if choice == 1:
             print("Enter path of the file to upload: ")
             filepath=input()
             normalizedfilepath = filehandler.FileHandler.normalize_path(filepath)
             FSC.upload_file(normalizedfilepath)
+            continue
         if choice == 2:
             print("enter the filename to download")
             file=input()
             print("enter the destination where you want to save the file to be downloaded")
             dest=input()
             FSC.download_file(file,dest)
+            continue
 
         if choice == 3:
             FSC.list_shared_files()
+            continue
         if choice == 4:
             keyword = input("Enter keyword to search for: ")
             FSC.search_files(keyword)
+            continue
+        if choice==88:
+            break;
+        else:
+            print("Try again and enter a valid number")
 
 
 

@@ -39,7 +39,7 @@ class FileSharePeer:
                     #Handle login
                     pass
                 elif command=="UPLOAD":
-                    #os.makedirs('shared_files', exist_ok=True)
+                    os.makedirs('shared_files', exist_ok=True)
                     message="Waiting for your upload..."
                     client_socket.send(message.encode())
                     received_message=client_socket.recv(1024).decode()
@@ -48,9 +48,9 @@ class FileSharePeer:
                     with open(os.path.join('shared_files', filename), 'wb') as f:
                         counter=0
                         while True:
-                            print("recv")
-                            print(counter)
-                            counter+=1
+                            # print("recv")
+                            # print(counter)
+                            #counter+=1
                             data = client_socket.recv(1024)
                             if data == b"END_OF_FILE":
                                 break
@@ -91,7 +91,8 @@ class FileSharePeer:
 
                     files = os.listdir('shared_files')
                     if not files:
-                        client_socket.send("".encode())  # send empty string
+                        client_socket.send("NOFILES".encode())  # send empty string
+                        print("NOOO")
                     else:
                         file_list = "\n".join(files)
                         client_socket.send(file_list.encode())
@@ -102,11 +103,10 @@ class FileSharePeer:
                     os.makedirs('shared_files', exist_ok=True)
                     files = os.listdir('shared_files')
                     matches = [f for f in files if keyword.lower() in f.lower()]
-
                     if matches:
                         response = "\n".join(matches)
                     else:
-                        response = ""
+                        response = "EMPTY"
                     client_socket.send(response.encode())
 
 
