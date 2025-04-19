@@ -78,6 +78,9 @@ class FileShareClient:
 
     def upload_file(self, filepath):
         # ... (Read file in chunks, encrypt chunks, send chunks to  peer - need to implement P2P filetransfer protocol - simplified) ...
+        if not self.username:
+            print("You must be logged in to upload files.")
+            return
         command="UPLOAD"
         self.client_socket.send(command.encode())
         ack_message=self.client_socket.recv(1024).decode()
@@ -103,7 +106,9 @@ class FileShareClient:
 
     def download_file(self, file_id, destination_path):
         # ... (Request file from peer, receive encrypted chunks, decryptchunks, verify integrity, save file) ...
-
+        if not self.username:
+            print("You must be logged in to download files.")
+            return
         command="DOWNLOAD"
         self.client_socket.send(command.encode())
         ack_message=self.client_socket.recv(1024).decode()
@@ -163,20 +168,30 @@ def main():
     #message=FSC.client_socket.recv(1024).decode()
     #print(message)
     choice=''
-    while True:
-        choice= int(input("HELLO WELCOME TO CIPHERSHARE to login enter 1 for signup enter 2 : "))
+    while choice != 0:
+
+        print("HELLO WELCOME TO CIPHERSHARE to login enter 1 for signup enter 2 : Choose 3 for uploading a file , 4 for downloading a file , 5 for listing all files and 6 for searching and 88 to end")
+        choice=int(input())
         if choice==1:
+            if FSC.username:
+                print(f"USER \"{FSC.username}\" ALREADY LOGGED IN")
+                choice=''
+                continue
             print("----------------------LOGIN----------------------")
+
             username=input("ENTER USERNAME : ")
             password=input("ENTER PASSWORD : ")
             result=FSC.login_user(username,password)
             if result:
                 print("LOGIN SUCCESSFUL!")
-                break
             else :
                 print("User info is wrong or user does not exist")
 
-        if choice== 2:
+        elif choice== 2:
+            if  FSC.username:
+                print(f"USER {FSC.username}ALREADY LOGGED IN")
+                choice=''
+                continue
             print("----------------------SIGNUP----------------------")
             username=input("ENTER USERNAME : ")
             password=input("ENTER PASSWORD : ")
@@ -185,22 +200,14 @@ def main():
                 print("SIGNUP SUCCESSFULY .... YOU WILL NEED TO LOGIN TO CONTINUE")
             else :
                 print("FAILED SIGNUP TRY ANOTHER USERNAME OR VALID PASSWORD")
-        else :
-            print("ENTER VALID CHOICE NUMBER ")
-        choice=''
 
-
-    while choice != 0:
-
-        print("Choose 1 for uploading a file , 2 for downloading a file , 3 for listing all files and 4 for searching and 88 to end")
-        choice=int(input())
-        if choice == 1:
+        elif choice == 3:
             print("Enter path of the file to upload: ")
             filepath=input()
             normalizedfilepath = filehandler.FileHandler.normalize_path(filepath)
             FSC.upload_file(normalizedfilepath)
 
-        if choice == 2:
+        elif choice == 4:
             print("enter the filename to download")
             file=input()
             print("enter the destination where you want to save the file to be downloaded")
@@ -208,14 +215,14 @@ def main():
             FSC.download_file(file,dest)
 
 
-        if choice == 3:
+        elif choice == 5:
             FSC.list_shared_files()
 
-        if choice == 4:
+        elif choice == 6:
             keyword = input("Enter keyword to search for: ")
             FSC.search_files(keyword)
 
-        if choice==88:
+        elif choice==88:
             break;
         else:
             print("Try again and enter a valid number")
