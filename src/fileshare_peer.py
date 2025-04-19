@@ -59,7 +59,14 @@ class FileSharePeer:
                     pass
                 elif command== "LOGIN":
                     #Handle login
-                    pass
+                    username = client_socket.recv(1024).decode()
+                    hashed_password = client_socket.recv(1024).decode()  # password already hashed from client
+
+                    if username in self.users and self.users[username] == hashed_password:
+                        client_socket.send("Login successful.".encode())
+                    else:
+                        client_socket.send("Invalid credentials.".encode())
+
                 elif command=="UPLOAD":
                     os.makedirs('shared_files', exist_ok=True)
                     message="Waiting for your upload..."

@@ -52,7 +52,29 @@ class FileShareClient:
 
         # ... (Implement login process - send username, password -  server / peer authenticates against stored hashed password - handle session - simplified sessionmanagementfor P2P could be token-basedor direct connectionbased) ...
         # ... (Client-side password hashing to compare against storedhash) ...
-         pass
+        try:
+
+            self.client_socket.send("LOGIN".encode())
+
+
+            hashed_password = crypto_utils.hash_password(password)
+
+
+            self.client_socket.send(username.encode())
+            self.client_socket.send(hashed_password.encode())
+
+
+            response = self.client_socket.recv(1024).decode()
+
+            if response == "Login successful.":
+                self.username = username
+                return True
+            else:
+                self.username = None
+                return False
+
+        except Exception as e:
+            print(f"Error during login: {e}")
 
     def upload_file(self, filepath):
         # ... (Read file in chunks, encrypt chunks, send chunks to  peer - need to implement P2P filetransfer protocol - simplified) ...
@@ -81,6 +103,7 @@ class FileShareClient:
 
     def download_file(self, file_id, destination_path):
         # ... (Request file from peer, receive encrypted chunks, decryptchunks, verify integrity, save file) ...
+
         command="DOWNLOAD"
         self.client_socket.send(command.encode())
         ack_message=self.client_socket.recv(1024).decode()
@@ -148,7 +171,7 @@ def main():
             password=input("ENTER PASSWORD : ")
             result=FSC.login_user(username,password)
             if result:
-                print("LOGIN SUCCESSFULLY")
+                print("LOGIN SUCCESSFUL!")
                 break
             else :
                 print("User info is wrong or user does not exist")
