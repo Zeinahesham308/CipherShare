@@ -2,7 +2,7 @@ import socket
 import threading
 import crypto_utils
 import os
-
+import json
 # ... (Data structures for user info, shared files, peer lists etc.)
 ...
 
@@ -15,6 +15,14 @@ class FileSharePeer:
         self.users = {} # {username: {hashed_password, salt, ...}} - In-memory for simplicity, consider file-based storage for persistence
         self.shared_files = {}  # {file_id: {filepath, owner_username, ...}} - Track files shared by this peer
         #self.handle_client_connection
+
+
+        # Load users from file if it exists
+        if os.path.exists("users.json"):
+            with open("users.json", "r") as f:
+                self.users = json.load(f)
+        else:
+            self.users = {}
     def start_peer(self):
         self.peer_socket.bind((self.host, self.port))
         self.peer_socket.listen(5) #5connections
@@ -33,7 +41,21 @@ class FileSharePeer:
                 #client_socket.send("Server Waiting for the command".encode())
                 command = client_socket.recv(1024).decode()  # Example - define command structure
                 if command == "REGISTER":
-                    #Handle this
+                    username = client_socket.recv(1024).decode()
+                    hashed_password = client_socket.recv(1024).decode()
+
+                    if username in self.users:
+                        print(self.users)
+                        client_socket.send("FAILED".encode())
+
+                    else:
+                        self.users[username] = hashed_password
+
+                        # Save updated users to file
+                        with open("users.json", "w") as f:
+                            json.dump(self.users, f)
+
+                        client_socket.send("Registration successful.".encode())
                     pass
                 elif command== "LOGIN":
                     #Handle login

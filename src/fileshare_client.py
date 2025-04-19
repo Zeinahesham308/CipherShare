@@ -26,6 +26,26 @@ class FileShareClient:
     def register_user(self, username, password):
         # ... (Implement registration process - send username, hashed  password + salt to a registration service / peer - how to distribute user info in P2P? - Simplification needed, perhaps a   dedicated'user registry' peer initially or file-based for simplicity) ...
         # ... (Client-side password hashing and salt generation) ...
+        try:
+            self.client_socket.send("REGISTER".encode())
+
+            # 🔒 Step 1: Hash the password locally
+            hashed_password = crypto_utils.hash_password(password)
+
+            self.client_socket.send(username.encode())
+            self.client_socket.send(hashed_password.encode())
+
+
+            response = self.client_socket.recv(1024).decode()
+            if response=="FAILED":
+                return False
+            else:
+                return True
+                print(response)
+
+
+        except Exception as e:
+            print(f"Error during registration: {e}")
         pass
 
     def login_user(self, username, password):
@@ -120,6 +140,33 @@ def main():
     #message=FSC.client_socket.recv(1024).decode()
     #print(message)
     choice=''
+    while True:
+        choice= int(input("HELLO WELCOME TO CIPHERSHARE to login enter 1 for signup enter 2 : "))
+        if choice==1:
+            print("----------------------LOGIN----------------------")
+            username=input("ENTER USERNAME : ")
+            password=input("ENTER PASSWORD : ")
+            result=FSC.login_user(username,password)
+            if result:
+                print("LOGIN SUCCESSFULLY")
+                break
+            else :
+                print("User info is wrong or user does not exist")
+
+        if choice== 2:
+            print("----------------------SIGNUP----------------------")
+            username=input("ENTER USERNAME : ")
+            password=input("ENTER PASSWORD : ")
+            result=FSC.register_user(username,password)
+            if result:
+                print("SIGNUP SUCCESSFULY .... YOU WILL NEED TO LOGIN TO CONTINUE")
+            else :
+                print("FAILED SIGNUP TRY ANOTHER USERNAME OR VALID PASSWORD")
+        else :
+            print("ENTER VALID CHOICE NUMBER ")
+        choice=''
+
+
     while choice != 0:
 
         print("Choose 1 for uploading a file , 2 for downloading a file , 3 for listing all files and 4 for searching and 88 to end")
@@ -129,27 +176,27 @@ def main():
             filepath=input()
             normalizedfilepath = filehandler.FileHandler.normalize_path(filepath)
             FSC.upload_file(normalizedfilepath)
-            continue
+
         if choice == 2:
             print("enter the filename to download")
             file=input()
             print("enter the destination where you want to save the file to be downloaded")
             dest=input()
             FSC.download_file(file,dest)
-            continue
+
 
         if choice == 3:
             FSC.list_shared_files()
-            continue
+
         if choice == 4:
             keyword = input("Enter keyword to search for: ")
             FSC.search_files(keyword)
-            continue
+
         if choice==88:
             break;
         else:
             print("Try again and enter a valid number")
-
+        choice = ''
 
 
 
