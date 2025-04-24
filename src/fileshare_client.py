@@ -2,6 +2,7 @@ import socket
 import crypto_utils
 import os
 import filehandler
+import time
 
 # ... (Constants for ports, network addresses, file chunk size etc.)
 ...
@@ -86,20 +87,22 @@ class FileShareClient:
         ack_message=self.client_socket.recv(1024).decode()
         print(ack_message)
 
+        self.client_socket.send(self.username.encode())
+        print(self.client_socket.recv(1024).decode())
         filename = os.path.basename(filepath)
         message=f"filename is : {filename}"
         self.client_socket.send(message.encode())
         print(f"filepath is:{filepath}")
-        counter=0
-        with open(filepath, 'rb') as f:
-            while chunk := f.read(1024):
-                # print("send")
-                # print (counter)
-                # counter+=1
-                self.client_socket.send(chunk)
-        self.client_socket.send(b"END_OF_FILE")
-        received_message=self.client_socket.recv(1024).decode()
-        print(received_message)
+        print("[Client] Waiting for START signal...")
+        message=self.client_socket.recv(1024).decode()
+        if message=="START":
+            with open(filepath, 'rb') as f:
+                while chunk := f.read(1024):
+                    time.sleep(0.01)
+                    self.client_socket.sendall(chunk)
+            self.client_socket.send(b"END_OF_FILE")
+            received_message=self.client_socket.recv(1024).decode()
+            print(received_message)
 
         # ... (File encryption using crypto_utils, integrity hash generation) ...
 

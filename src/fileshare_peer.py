@@ -3,6 +3,7 @@ import threading
 import crypto_utils
 import os
 import json
+import  time
 # ... (Data structures for user info, shared files, peer lists etc.)
 ...
 
@@ -69,26 +70,40 @@ class FileSharePeer:
 
                 elif command=="UPLOAD":
                     os.makedirs('shared_files', exist_ok=True)
-                    message="Waiting for your upload..."
+
+                    message = "Waiting for your upload..."
                     client_socket.send(message.encode())
-                    received_message=client_socket.recv(1024).decode()
+
+                    username = client_socket.recv(1024).decode()
+                    client_socket.send("USERNAME RECEIVED".encode())
+
+                    # Create a folder for that user if it doesn't exist
+                    user_folder = os.path.join('shared_files', username)
+                    os.makedirs(user_folder, exist_ok=True)
+
+                    received_message = client_socket.recv(1024).decode()
                     print(received_message)
+
                     filename = received_message.split("filename is : ")[1].strip()
-                    with open(os.path.join('shared_files', filename), 'wb') as f:
-                        counter=0
+                    filepath = os.path.join(user_folder, filename)
+                    client_socket.send("START".encode())
+                    with open(filepath, 'wb') as f:
                         while True:
-                            # print("recv")
-                            # print(counter)
-                            #counter+=1
                             data = client_socket.recv(1024)
                             if data == b"END_OF_FILE":
                                 break
                             f.write(data)
 
-                    print("[Receiver] File received and saved.")
-                    message="file uploaded successfully"
+                    print(f"[Receiver] File '{filename}' received and saved to {filepath}.")
+
+                    # You can also register the file here for later use
+                    self.shared_files[filename] = {
+                        "filepath": filepath,
+                        "owner": username
+                    }
+
+                    message = "file uploaded successfully"
                     client_socket.send(message.encode())
-                    #handle upload
 
 
 
@@ -97,8 +112,18 @@ class FileSharePeer:
                     client_socket.send(message.encode())
                     filename=client_socket.recv(1024).decode()
                     print(f"file to be downlaoded is : {filename}")
+                    filepath = None
+                    for root, dirs, files in os.walk("shared_files"):
+                        if filename in files:
+                            filepath = os.path.join(root, filename)
+                            print(filepath)
+                            break
 
-                    filepath = os.path.join("shared_files", filename)
+                    if not filepath or not os.path.exists(filepath):
+                        client_socket.send(f"ERROR: File '{filename}' not found.".encode())
+                        return
+
+                    #filepath = os.path.join("shared_files", filename)
 
                     if not os.path.exists(filepath):
                         client_socket.send(f"ERROR: File '{filename}' not found.".encode())
@@ -106,6 +131,7 @@ class FileSharePeer:
                     client_socket.send("OK".encode())  # confirm file is ready
                     with open(filepath, 'rb') as f:
                         while chunk := f.read(1024):
+                            time.sleep(0.01)
                             client_socket.sendall(chunk)
                     client_socket.send(b"END_OF_FILE")
 
@@ -116,26 +142,39 @@ class FileSharePeer:
                     pass
                 elif command=="LIST":
                     print(f"[Server] Client requested list of shared files.")
-                    os.makedirs('shared_files', exist_ok=True)  # Make sure folder exists
+                    os.makedirs('shared_files', exist_ok=True)
 
-                    files = os.listdir('shared_files')
-                    if not files:
-                        client_socket.send("NOFILES".encode())  # send empty string
-                        print("NOOO")
+                    file_paths = []
+                    for root, dirs, files in os.walk('shared_files'):
+                        for file in files:
+                            relative_path = os.path.relpath(os.path.join(root, file), 'shared_files')
+                            file_paths.append(relative_path)
+
+                    if not file_paths:
+                        client_socket.send("NOFILES".encode())
+                        print("NO FILES FOUND")
                     else:
-                        file_list = "\n".join(files)
+                        file_list = "\n".join(file_paths)
                         client_socket.send(file_list.encode())
 
                 elif command == "SEARCH":
                     keyword = client_socket.recv(1024).decode().strip()
                     print(f"[Server] Searching for: {keyword}")
+
                     os.makedirs('shared_files', exist_ok=True)
-                    files = os.listdir('shared_files')
-                    matches = [f for f in files if keyword.lower() in f.lower()]
+
+                    matches = []
+                    for root, dirs, files in os.walk('shared_files'):
+                        for file in files:
+                            if keyword.lower() in file.lower():
+                                relative_path = os.path.relpath(os.path.join(root, file), 'shared_files')
+                                matches.append(relative_path)
+
                     if matches:
                         response = "\n".join(matches)
                     else:
                         response = "EMPTY"
+
                     client_socket.send(response.encode())
 
 
