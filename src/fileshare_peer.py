@@ -33,6 +33,20 @@ class FileSharePeer:
             client_thread = threading.Thread(target=self.handle_client_connection, args=(client_socket, client_address))
             client_thread.start()
 
+    # def register_with_rendezvous(self, rendezvous_host, rendezvous_port):
+    #     try:
+    #         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #         s.connect((rendezvous_host, rendezvous_port))
+    #
+    #         # Send REGISTER message with this peer's port
+    #         register_msg = f"REGISTER:{self.port}"
+    #         s.send(register_msg.encode())
+    #         response = s.recv(1024).decode()
+    #         print(f"[Rendezvous] Server response: {response}")
+    #         s.close()
+    #     except Exception as e:
+    #         print(f"[Rendezvous] Registration failed: {e}")
+
     def handle_client_connection(self, client_socket, client_address):
         print(f"Accepted connection from {client_address}")
 
@@ -46,7 +60,7 @@ class FileSharePeer:
                     hashed_password = client_socket.recv(1024).decode()
 
                     if username in self.users:
-                        print(self.users)
+                        #print(self.users)
                         client_socket.send("FAILED".encode())
 
                     else:

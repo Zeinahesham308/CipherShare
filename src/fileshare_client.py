@@ -12,6 +12,7 @@ class FileShareClient:
     def __init__(self):
         self.client_socket = socket.socket(socket.AF_INET,
                                            socket.SOCK_STREAM)
+        self.rv_socket=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.username = None
         self.session_key = None  # For symmetric encryption with peers
 
@@ -24,13 +25,47 @@ class FileShareClient:
             print(f"Error connecting to peer {peer_address}: {e}")
             return False
 
+    def register_with_rendezvous(self, username, rendezvous_server_ip='127.0.0.1', rendezvous_server_port=9000):
+        try:
+
+            self.rv_socket.connect((rendezvous_server_ip, rendezvous_server_port))
+
+            # Send REGISTER message with your port and username
+            message = f"REGISTER {self.client_socket.getsockname()[1]} {username}"
+            self.rv_socket.send(message.encode())
+            self.rv_socket.recv(1024)  # Wait for confirmation
+            print(f"[Client] Successfully registered as '{username}' with Rendezvous Server.")
+            #rv_socket.close()
+            return True
+
+
+        except Exception as e:
+            print(f"Error registering with Rendezvous Server: {e}")
+
+    def get_peer_list(self):
+        try:
+            self.rv_socket.send("LIST".encode())
+            peers = self.rv_socket.recv(1024).decode()
+            #self.rv_socket.close()
+            if peers.strip() == "":
+                print("[Client] No other peers found.")
+                return []
+            peer_list = peers.strip().split("\n")
+            print("[Client] Discovered Peers:")
+            for peer in peer_list:
+                print(f" -> {peer}")
+            return peer_list
+        except Exception as e:
+            print(f"Error retrieving peer list: {e}")
+            return []
+
     def register_user(self, username, password):
         # ... (Implement registration process - send username, hashed  password + salt to a registration service / peer - how to distribute user info in P2P? - Simplification needed, perhaps a   dedicated'user registry' peer initially or file-based for simplicity) ...
         # ... (Client-side password hashing and salt generation) ...
         try:
             self.client_socket.send("REGISTER".encode())
 
-            # 🔒 Step 1: Hash the password locally
+            #  Step 1: Hash the password locally
             hashed_password = crypto_utils.hash_password(password)
 
             self.client_socket.send(username.encode())
@@ -69,6 +104,7 @@ class FileShareClient:
 
             if response == "Login successful.":
                 self.username = username
+                self.register_with_rendezvous(self.username)
                 return True
             else:
                 self.username = None
@@ -168,12 +204,18 @@ class FileShareClient:
 def main():
     FSC = FileShareClient()
     FSC.connect_to_peer(('127.0.0.1', 5555))
+
+    # Discover peers automatically
+    # available_peers = FSC.discover_peers()
+    # print(f"Available peers: {available_peers}")
+
+
     #message=FSC.client_socket.recv(1024).decode()
     #print(message)
     choice=''
     while choice != 0:
 
-        print("HELLO WELCOME TO CIPHERSHARE to login enter 1 for signup enter 2 : Choose 3 for uploading a file , 4 for downloading a file , 5 for listing all files and 6 for searching and 88 to end")
+        print("******** HELLO WELCOME TO CIPHERSHARE  ********  \n - Enter Tagrget number -\n[1]login\n[2]Signup\n[3]Uploading a file\n[4]Downloading a file\n[5]Listing all files\n[6]Searching for a file\n[7]Listing all online peers\n[8]End\n")
         choice=int(input())
         if choice==1:
             if FSC.username:
@@ -224,8 +266,10 @@ def main():
         elif choice == 6:
             keyword = input("Enter keyword to search for: ")
             FSC.search_files(keyword)
+        elif choice ==7 :
+            FSC.get_peer_list()
 
-        elif choice==88:
+        elif choice==8:
             break;
         else:
             print("Try again and enter a valid number")
