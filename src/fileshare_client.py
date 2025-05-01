@@ -3,6 +3,7 @@ import crypto_utils
 import os
 import filehandler
 import time
+from crypto_utils import encrypt_file, hash_file, decrypt_file
 
 # ... (Constants for ports, network addresses, file chunk size etc.)
 ...
@@ -104,6 +105,9 @@ class FileShareClient:
 
             if response == "Login successful.":
                 self.username = username
+
+                salt = b'static_salt_for_now'  # Later: retrieve per-user salt from file
+                self.session_key = crypto_utils.derive_key_from_password(password, salt)
                 self.register_with_rendezvous(self.username)
                 return True
             else:
@@ -114,58 +118,170 @@ class FileShareClient:
             print(f"Error during login: {e}")
 
     def upload_file(self, filepath):
-        # ... (Read file in chunks, encrypt chunks, send chunks to  peer - need to implement P2P filetransfer protocol - simplified) ...
+        """
+        Encrypts and uploads a file to the server
+
+        Args:
+            filepath (str): Path to the file to upload
+        """
         if not self.username:
             print("You must be logged in to upload files.")
             return
-        command="UPLOAD"
-        self.client_socket.send(command.encode())
-        ack_message=self.client_socket.recv(1024).decode()
-        print(ack_message)
 
-        self.client_socket.send(self.username.encode())
-        print(self.client_socket.recv(1024).decode())
+        # Check if file exists
+        if not os.path.isfile(filepath):
+            print(f"Error: File '{filepath}' does not exist.")
+            return
+
+        print(f"[Client] Encrypting file: {filepath}")
+
+        # Create temp directory if it doesn't exist
+        file_dir = os.path.dirname(filepath)
+        temp_dir = os.path.join(file_dir, "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+
+        # Generate temp file path
         filename = os.path.basename(filepath)
-        message=f"filename is : {filename}"
-        self.client_socket.send(message.encode())
-        print(f"filepath is:{filepath}")
-        print("[Client] Waiting for START signal...")
-        message=self.client_socket.recv(1024).decode()
-        if message=="START":
-            with open(filepath, 'rb') as f:
-                while chunk := f.read(1024):
-                    time.sleep(0.01)
-                    self.client_socket.sendall(chunk)
-            self.client_socket.send(b"END_OF_FILE")
-            received_message=self.client_socket.recv(1024).decode()
-            print(received_message)
+        temp_path = os.path.join(temp_dir, filename + ".enc")
+
+        try:
+            # Encrypt the file
+            encrypted_data = encrypt_file(filepath, self.session_key)
+
+            # Save encrypted data to temp file
+            with open(temp_path, 'wb') as f:
+                f.write(encrypted_data)
+
+            # Generate hash of encrypted file
+            file_hash = hash_file(temp_path)
+            print(f"[Client] SHA-256 hash of encrypted file: {file_hash}")
+            print(f"[Client] Temporary encrypted file saved to: {temp_path}")
+
+            # Start upload process
+            command = "UPLOAD"
+            self.client_socket.send(command.encode())
+            ack_message = self.client_socket.recv(1024).decode()
+            print(ack_message)
+
+            # Send username
+            self.client_socket.send(self.username.encode())
+            username_response = self.client_socket.recv(1024).decode()
+            print(username_response)
+
+            # Send filename (original, not the temp one)
+            message = f"filename is : {filename}.enc"
+            self.client_socket.send(message.encode())
+
+            # Check if server received filename
+            filename_response = self.client_socket.recv(1024).decode()
+            if filename_response == "RECEIVED":
+                self.client_socket.send(file_hash.encode())
+            else:
+                self.client_socket.send("FAILURE".encode())
+                print("Failed to send filename to server")
+                return
+
+            print(f"[Client] Original filepath: {filepath}")
+            print(f"[Client] Encrypted filepath: {temp_path}")
+            print("[Client] Waiting for START signal...")
+
+            message = self.client_socket.recv(1024).decode()
+            if message == "START":
+                # Send the encrypted file
+                with open(temp_path, 'rb') as f:
+                    while chunk := f.read(1024):
+                        time.sleep(0.01)
+                        self.client_socket.sendall(chunk)
+
+                self.client_socket.send(b"END_OF_FILE")
+
+                # Wait for server confirmation
+                received_message = self.client_socket.recv(1024).decode()
+                print(received_message)
+
+                # Clean up the temporary file
+                os.remove(temp_path)
+                print(f"[Client] Temporary encrypted file {temp_path} removed.")
+
+                # Try to remove temp directory if empty
+                try:
+                    os.rmdir(temp_dir)
+                    print(f"[Client] Temporary directory removed: {temp_dir}")
+                except OSError:
+                    # Directory not empty, which is fine
+                    pass
+
+        except Exception as e:
+            print(f"[Error] Failed to upload file: {str(e)}")
+            # Clean up in case of error
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+                print(f"[Client] Temporary encrypted file {temp_path} removed due to error.")
 
         # ... (File encryption using crypto_utils, integrity hash generation) ...
 
 
     def download_file(self, file_id, destination_path):
         # ... (Request file from peer, receive encrypted chunks, decryptchunks, verify integrity, save file) ...
-        if not self.username:
+        if not self.username or not self.session_key:
             print("You must be logged in to download files.")
             return
         command="DOWNLOAD"
         self.client_socket.send(command.encode())
         ack_message=self.client_socket.recv(1024).decode()
         print(ack_message)
+
         self.client_socket.send(file_id.encode())
         reply=self.client_socket.recv(1024).decode()
+
         if reply.startswith("ERROR"):
             print("there is no such a file to download")
             print("redirecting you to the options...")
+            return
+
         if reply=="OK":
-            with open(destination_path, 'wb') as f:
+            expected_hash = self.client_socket.recv(1024).decode()
+            print(f"[Client] Expected SHA-256 hash from server: {expected_hash}")
+
+            start_signal = self.client_socket.recv(1024).decode()
+            if start_signal != "START":
+                print("Did not receive START signal. Aborting.")
+                return
+
+            encrypted_path = destination_path + ".enc"
+            with open(encrypted_path, 'wb') as f:
                 while True:
                     data = self.client_socket.recv(1024)
                     if data == b"END_OF_FILE":
                         break
                     f.write(data)
-            print("[Client] File downloaded and saved to", destination_path)
 
+            print(f"[Client] Encrypted file received at: {encrypted_path}")
+
+            # Verify hash
+            actual_hash = hash_file(encrypted_path)
+            print(f"[Client] Actual SHA-256 hash: {actual_hash}")
+
+            if actual_hash != expected_hash:
+                print("File hash mismatch! File may be corrupted.")
+                user_choice = input("Do you want to proceed with decryption anyway? (y/n): ")
+                if user_choice.lower() != 'y':
+                    print("Download aborted.")
+                    os.remove(encrypted_path)
+                    return
+            else:
+                print("File integrity verified. Proceeding to decrypt.")
+
+            try:
+                # Try to decrypt the file
+                decrypt_file(encrypted_path, self.session_key)
+                os.rename(encrypted_path, destination_path)
+                print(f"[Client] File decrypted and saved to {destination_path}")
+            except Exception as e:
+                print(f"Error during decryption: {e}")
+                print("The file might be corrupted or using a different encryption key.")
+                # Clean up the encrypted file
+                os.remove(encrypted_path)
 
         # ... (File decryption, integrity verification) ...
         pass
@@ -253,9 +369,9 @@ def main():
             FSC.upload_file(normalizedfilepath)
 
         elif choice == 4:
-            print("enter the filename to download")
+            print("enter the filename to download ex :  name.pdf.enc")
             file=input()
-            print("enter the destination where you want to save the file to be downloaded")
+            print("enter the destination where you want to save the file to be downloaded\n example C:\\Users\\zeina\\Desktop\\myfiles\\yourfilename")
             dest=input()
             FSC.download_file(file,dest)
 

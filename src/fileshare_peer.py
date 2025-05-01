@@ -1,11 +1,12 @@
 import socket
 import threading
-import crypto_utils
 import os
+from crypto_utils import encrypt_file, hash_file, decrypt_file
 import json
 import  time
 # ... (Data structures for user info, shared files, peer lists etc.)
 ...
+
 
 
 class FileSharePeer:
@@ -33,19 +34,6 @@ class FileSharePeer:
             client_thread = threading.Thread(target=self.handle_client_connection, args=(client_socket, client_address))
             client_thread.start()
 
-    # def register_with_rendezvous(self, rendezvous_host, rendezvous_port):
-    #     try:
-    #         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #         s.connect((rendezvous_host, rendezvous_port))
-    #
-    #         # Send REGISTER message with this peer's port
-    #         register_msg = f"REGISTER:{self.port}"
-    #         s.send(register_msg.encode())
-    #         response = s.recv(1024).decode()
-    #         print(f"[Rendezvous] Server response: {response}")
-    #         s.close()
-    #     except Exception as e:
-    #         print(f"[Rendezvous] Registration failed: {e}")
 
     def handle_client_connection(self, client_socket, client_address):
         print(f"Accepted connection from {client_address}")
@@ -96,36 +84,64 @@ class FileSharePeer:
                     os.makedirs(user_folder, exist_ok=True)
 
                     received_message = client_socket.recv(1024).decode()
-                    print(received_message)
 
                     filename = received_message.split("filename is : ")[1].strip()
-                    filepath = os.path.join(user_folder, filename)
-                    client_socket.send("START".encode())
-                    with open(filepath, 'wb') as f:
-                        while True:
-                            data = client_socket.recv(1024)
-                            if data == b"END_OF_FILE":
-                                break
-                            f.write(data)
+                    print(f"File name received is {filename}")
 
-                    print(f"[Receiver] File '{filename}' received and saved to {filepath}.")
+                    client_socket.send("RECEIVED".encode())
+                    message=client_socket.recv(1024).decode()
+                    if message=="FAILURE":
+                        print(" file hash is not RECEIVED")
+                    else:
+                        expected_hash = message
+                        print(f"[Server] Received expected file hash: {expected_hash}")
 
-                    # You can also register the file here for later use
-                    self.shared_files[filename] = {
-                        "filepath": filepath,
-                        "owner": username
-                    }
+                        filepath = os.path.join(user_folder, filename)
+                        client_socket.send("START".encode())
 
-                    message = "file uploaded successfully"
-                    client_socket.send(message.encode())
+
+                        with open(filepath, 'wb') as f:
+                            while True:
+                                data = client_socket.recv(1024)
+                                if data == b"END_OF_FILE":
+                                    break
+                                f.write(data)
+
+                        print(f"[Server] File '{filename}' received and saved to {filepath}.")
+
+
+                        actual_hash = hash_file(filepath)
+                        print(f"[Server] Actual hash:   {actual_hash}")
+                        print(f"[Server] Expected hash: {expected_hash}")
+
+                        if actual_hash == expected_hash:
+                            print("File integrity verified.")
+                        else:
+                            print("WARNING: Hash mismatch...!!! Upload may be corrupted!!.")
+
+
+                        # You can also register the file here for later use
+                        self.shared_files[filename] = {
+                            "filepath": filepath,
+                            "owner": username
+                        }
+
+                        message = "file uploaded successfully"
+                        client_socket.send(message.encode())
 
 
 
                 elif command =="DOWNLOAD":
+
                     message="you can  download now..."
                     client_socket.send(message.encode())
+
+
                     filename=client_socket.recv(1024).decode()
                     print(f"file to be downlaoded is : {filename}")
+
+
+
                     filepath = None
                     for root, dirs, files in os.walk("shared_files"):
                         if filename in files:
@@ -139,10 +155,18 @@ class FileSharePeer:
 
                     #filepath = os.path.join("shared_files", filename)
 
-                    if not os.path.exists(filepath):
-                        client_socket.send(f"ERROR: File '{filename}' not found.".encode())
-                        return
+
                     client_socket.send("OK".encode())  # confirm file is ready
+                    time.sleep(0.05)
+                    file_hash = hash_file(filepath)
+                    client_socket.send(file_hash.encode())  # send hash first
+                    print(f"[Server] Sent hash: {file_hash}")
+
+                    time.sleep(0.05)
+                    client_socket.send("START".encode())
+                    print("[Server] Sending file...")
+
+
                     with open(filepath, 'rb') as f:
                         while chunk := f.read(1024):
                             time.sleep(0.01)
