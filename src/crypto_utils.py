@@ -1,9 +1,54 @@
 import os
 import hashlib
+import base64
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+
+# Hash password with PBKDF2 and random salt
+def hash_password_with_salt(password):
+    salt = os.urandom(16)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    hashed_password = kdf.derive(password.encode())
+    return base64.b64encode(hashed_password).decode(), base64.b64encode(salt).decode()
+def derive_hash_with_existing_salt(password, salt_b64):
+    salt = base64.b64decode(salt_b64)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    derived = kdf.derive(password.encode())
+    return base64.b64encode(derived).decode()
+
+# Verify a password using stored hash and salt
+def verify_password_with_salt(password, stored_hash, stored_salt):
+    salt = base64.b64decode(stored_salt)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    try:
+        kdf.verify(password.encode(), base64.b64decode(stored_hash))
+        return True
+    except Exception:
+        return False
+
+
+
+
 
 
 def hash_password(password: str) -> str:
@@ -17,7 +62,9 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
-def derive_key_from_password(password, salt):
+# Derive encryption key from password and stored salt
+def derive_key_from_password(password, salt_b64):
+    salt = base64.b64decode(salt_b64)
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -26,7 +73,6 @@ def derive_key_from_password(password, salt):
         backend=default_backend()
     )
     return kdf.derive(password.encode())
-
 
 def generate_random_key():
     return os.urandom(32)  # AES-256

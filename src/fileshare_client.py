@@ -3,7 +3,7 @@ import crypto_utils
 import os
 import filehandler
 import time
-from crypto_utils import encrypt_file, hash_file, decrypt_file
+from crypto_utils import encrypt_file, hash_file, decrypt_file,hash_password_with_salt
 
 # ... (Constants for ports, network addresses, file chunk size etc.)
 ...
@@ -66,24 +66,19 @@ class FileShareClient:
         try:
             self.client_socket.send("REGISTER".encode())
 
-            #  Step 1: Hash the password locally
-            hashed_password = crypto_utils.hash_password(password)
+            # Generate secure password hash + salt
+            hashed_password, salt = crypto_utils.hash_password_with_salt(password)
 
             self.client_socket.send(username.encode())
             self.client_socket.send(hashed_password.encode())
-
+            self.client_socket.send(salt.encode())
 
             response = self.client_socket.recv(1024).decode()
-            if response=="FAILED":
-                return False
-            else:
-                return True
-                print(response)
-
+            return response != "FAILED"
 
         except Exception as e:
             print(f"Error during registration: {e}")
-        pass
+            return False
 
     def login_user(self, username, password):
 
@@ -92,21 +87,20 @@ class FileShareClient:
         try:
 
             self.client_socket.send("LOGIN".encode())
-
-
-            hashed_password = crypto_utils.hash_password(password)
-
-
             self.client_socket.send(username.encode())
+
+            salt = self.client_socket.recv(1024).decode()
+            if salt == "NO_USER":
+                print("User not found.")
+                return False
+
+            hashed_password = crypto_utils.derive_hash_with_existing_salt(password, salt)
             self.client_socket.send(hashed_password.encode())
 
 
             response = self.client_socket.recv(1024).decode()
-
             if response == "Login successful.":
                 self.username = username
-
-                salt = b'static_salt_for_now'  # Later: retrieve per-user salt from file
                 self.session_key = crypto_utils.derive_key_from_password(password, salt)
                 self.register_with_rendezvous(self.username)
                 return True
@@ -116,6 +110,7 @@ class FileShareClient:
 
         except Exception as e:
             print(f"Error during login: {e}")
+            return False
 
     def upload_file(self, filepath):
         """
@@ -312,7 +307,7 @@ class FileShareClient:
                 for file in file_list.strip().split("\n"):
                     print(f" {file}")
             ...
-            pass
+
 
     # ... (Methods for P2P message handling, network discovery - simplified) ...
 
@@ -335,7 +330,7 @@ def main():
         choice=int(input())
         if choice==1:
             if FSC.username:
-                print(f"USER \"{FSC.username}\" ALREADY LOGGED IN")
+                print(f"USER \"{FSC.username}\"  ALREADY LOGGED IN")
                 choice=''
                 continue
             print("----------------------LOGIN----------------------")

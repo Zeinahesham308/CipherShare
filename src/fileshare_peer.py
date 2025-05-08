@@ -46,13 +46,17 @@ class FileSharePeer:
                 if command == "REGISTER":
                     username = client_socket.recv(1024).decode()
                     hashed_password = client_socket.recv(1024).decode()
+                    salt = client_socket.recv(1024).decode()
 
                     if username in self.users:
                         #print(self.users)
                         client_socket.send("FAILED".encode())
 
                     else:
-                        self.users[username] = hashed_password
+                        self.users[username] = {
+                            "hashed_password": hashed_password,
+                            "salt": salt
+                        }
 
                         # Save updated users to file
                         with open("users.json", "w") as f:
@@ -63,9 +67,16 @@ class FileSharePeer:
                 elif command== "LOGIN":
                     #Handle login
                     username = client_socket.recv(1024).decode()
-                    hashed_password = client_socket.recv(1024).decode()  # password already hashed from client
+                    if username not in self.users:
+                        client_socket.send("NO_USER".encode())
+                        continue
+                    salt = self.users[username]["salt"]
+                    client_socket.send(salt.encode())
 
-                    if username in self.users and self.users[username] == hashed_password:
+                    hashed_password = client_socket.recv(1024).decode()
+                    stored_hash = self.users[username]["hashed_password"]
+
+                    if hashed_password == stored_hash:
                         client_socket.send("Login successful.".encode())
                     else:
                         client_socket.send("Invalid credentials.".encode())
