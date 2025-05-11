@@ -2,6 +2,8 @@ class FileHandler:
     def __init__(self, filepath):
         self.path = filepath
 
+
+
     @staticmethod
     def normalize_path(path):
         #path = path.strip()
