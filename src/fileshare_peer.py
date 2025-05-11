@@ -1,3 +1,4 @@
+import hashlib
 import socket
 import threading
 import os
@@ -47,13 +48,18 @@ class FileSharePeer:
                 #client_socket.send("Server Waiting for the command".encode())
                 command = client_socket.recv(1024).decode()  # Example - define command structure
                 if command == "REGISTER":
-                    print("LOL")
-                    username = client_socket.recv(1024).decode()
-                    hashed_password = client_socket.recv(1024).decode()
-                    salt = client_socket.recv(1024).decode()
+                    data = client_socket.recv(4096).decode()
+                    parts = data.split("\n")
+                    if len(parts) >= 3:
+                        username = parts[0]
+                        hashed_password = parts[1]
+                        salt = parts[2]
+                    else:
+                        print("error")
+                        return
 
                     if username in self.users:
-                        #print(self.users)
+                        print(self.users)
                         client_socket.send("FAILED".encode())
 
                     else:
@@ -61,6 +67,7 @@ class FileSharePeer:
                             "hashed_password": hashed_password,
                             "salt": salt
                         }
+
 
                         # Save updated users to file
                         with open("users.json", "w") as f:
@@ -219,14 +226,6 @@ class FileSharePeer:
                     client_socket.send("OK".encode())  # confirm file is ready
                     time.sleep(0.05)
 
-                    file_hash = hash_file(filepath)
-                    client_socket.send(file_hash.encode())  # send hash first
-                    print(f"[Server] Sent hash: {file_hash}")
-
-                    time.sleep(0.05)
-                    client_socket.send("START".encode())
-                    print("[Server] Sending file...")
-
                     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
                     from cryptography.hazmat.backends import default_backend
 
@@ -244,15 +243,24 @@ class FileSharePeer:
 
                     encrypted = encryptor.update(data) + encryptor.finalize()
 
+                    # Hash the actual encrypted bytes you will send
+                    file_hash = hashlib.sha256(encrypted).hexdigest()
+                    client_socket.send(file_hash.encode())  # send hash of encrypted data
+
+                    time.sleep(0.05)
+                    client_socket.send("START".encode())
+                    print("[Server] Sending file...")
+
+                    # Now send the encrypted data in chunks
                     for i in range(0, len(encrypted), 1024):
                         print("#", end='', flush=True)
                         chunk = encrypted[i:i + 1024]
                         time.sleep(0.01)
                         client_socket.sendall(chunk)
+
                     client_socket.send(b"END_OF_FILE")
                     print(f"\n[Server] Sent {len(encrypted)} bytes in chunks.")
                     print(f"File '{filename}' sent to requester.")
-                    return
 
                 elif command=="LIST":
                     print(f"[Server] Client requested list of shared files.")
@@ -290,8 +298,6 @@ class FileSharePeer:
                         response = "EMPTY"
 
                     client_socket.send(response.encode())
-
-
 
 
                 elif command == "SEARCH_DIST":

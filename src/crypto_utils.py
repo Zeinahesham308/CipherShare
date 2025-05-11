@@ -186,6 +186,7 @@ def generate_fernet_key_from_password(password: str, salt: bytes) -> bytes:
     )
     return base64.urlsafe_b64encode(kdf.derive(password.encode()))
 
+
 def encrypt_and_save_credentials(file_path, data_dict, fernet_key):
     f = Fernet(fernet_key)
     encrypted = f.encrypt(json.dumps(data_dict).encode())

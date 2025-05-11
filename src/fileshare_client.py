@@ -1,3 +1,4 @@
+import hashlib
 import socket
 import crypto_utils
 import os
@@ -135,10 +136,8 @@ class FileShareClient:
             # Generate secure password hash + salt
             hashed_password, salt = crypto_utils.hash_password_with_salt(password)
 
-            self.client_socket.send(username.encode())
-            self.client_socket.send(hashed_password.encode())
-            self.client_socket.send(salt.encode())
-
+            payload = f"{username}\n{hashed_password}\n{salt}\n"
+            self.client_socket.send(payload.encode())
             response = self.client_socket.recv(1024).decode()
             return response != "FAILED"
 
@@ -245,12 +244,17 @@ class FileShareClient:
                     print("File not found.")
                     return
 
-                expected_hash = s.recv(1024).decode()
-                s.recv(1024)  # START
+
 
                 iv = s.recv(16)
                 cipher = Cipher(algorithms.AES(self.session_key), modes.CBC(iv), backend=default_backend())
                 decryptor = cipher.decryptor()
+                hasher = hashlib.sha256()
+                expected_hash = s.recv(1024).decode()
+
+                s.recv(1024).decode()  # START
+                if (s == "Start"):
+                    print("[Client] Iam going to download now")
 
                 with open(decrypted_filepath, 'wb') as f:
                     buffer = b""
@@ -258,6 +262,7 @@ class FileShareClient:
                         data = s.recv(1024)
                         if data == b"END_OF_FILE":
                             break
+                        hasher.update(data)
                         buffer += data
                         while len(buffer) >= 16:
                             chunk = buffer[:16]
@@ -269,7 +274,8 @@ class FileShareClient:
                     if final:
                         f.write(final)
 
-            actual_hash = hash_file(decrypted_filepath)
+            print(f"CLIENT {expected_hash}")
+            actual_hash = hasher.hexdigest()
             if actual_hash != expected_hash:
                 print("[WARNING] File hash mismatch! The file may be corrupted.")
             else:
@@ -512,7 +518,7 @@ def main():
             time.sleep(1.5)
     else:
         print("credentials not found need to login or signup")
-        peer_thread = threading.Thread(target=FSC.start_local_peer, daemon=True)
+        peer_thread = threading.Thread(target=FSC.start_local_peer, args=(username,), daemon=True)
         peer_thread.start()
         time.sleep(1.5)
     FSC.connect_to_me(FSC.my_peer_port)

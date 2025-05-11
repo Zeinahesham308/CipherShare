@@ -1,6 +1,6 @@
 import socket
 import threading
-
+#comment
 connected_peers = []  # List of dictionaries: [{'ip': ..., 'port': ..., 'username': ...}]
 
 def handle_peer(peer_socket, addr):
@@ -35,6 +35,7 @@ def handle_peer(peer_socket, addr):
                         'ip': addr[0],
                         'port': int(port),
                         'username': username
+
                     }
                     connected_peers.append(peer_info)
                     peer_socket.send("REGISTERED".encode())
