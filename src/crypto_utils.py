@@ -172,10 +172,7 @@ def hash_file(filepath):
 
 
 def generate_fernet_key_from_password(password: str, salt: bytes) -> bytes:
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.backends import default_backend
-    import base64
+
 
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
