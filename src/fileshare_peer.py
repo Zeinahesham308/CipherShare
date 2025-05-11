@@ -262,22 +262,23 @@ class FileSharePeer:
                     print(f"\n[Server] Sent {len(encrypted)} bytes in chunks.")
                     print(f"File '{filename}' sent to requester.")
 
-                elif command=="LIST":
-                    print(f"[Server] Client requested list of shared files.")
-                    os.makedirs('shared_files', exist_ok=True)
 
-                    file_paths = []
-                    for root, dirs, files in os.walk('shared_files'):
-                        for file in files:
-                            relative_path = os.path.relpath(os.path.join(root, file), 'shared_files')
-                            file_paths.append(relative_path)
-
-                    if not file_paths:
+                elif command == "LIST":
+                    if not self.active_username:
                         client_socket.send("NOFILES".encode())
-                        print("NO FILES FOUND")
-                    else:
-                        file_list = "\n".join(file_paths)
-                        client_socket.send(file_list.encode())
+                        return
+
+                    user_dir = os.path.join("shared_files", self.active_username)
+                    file_paths = []
+
+                    if os.path.exists(user_dir):
+                        for root, dirs, files in os.walk(user_dir):
+                            for file in files:
+                                relative_path = os.path.relpath(os.path.join(root, file), "shared_files")
+                                file_paths.append(relative_path)
+
+                    response = "\n".join(file_paths) if file_paths else "NOFILES"
+                    client_socket.send(response.encode())
 
                 elif command == "SEARCH":
                     keyword = client_socket.recv(1024).decode().strip()

@@ -469,15 +469,30 @@ class FileShareClient:
 
 
     def list_shared_files(self):
-            # ... (Keep track of locally shared files and display them)
-            self.client_socket.send("LIST".encode())
-            file_list = self.client_socket.recv(4096).decode()
-            print("\n Shared Files:")
-            if file_list == "NOFILES":
-                print("No files are currently shared.")
-            else:
-                for file in file_list.strip().split("\n"):
-                    print(f" {file}")
+        peer_list = self.get_peer_list()
+        print("\n[Client] Querying all online peers for shared files...\n")
+
+        for peer_info in peer_list:
+            try:
+                ip_port = peer_info.split(" ")[0]
+                ip, port = ip_port.split(":")
+                port = int(port)
+
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(2)
+                    s.connect((ip, port))
+                    s.send("LIST".encode())
+
+                    response = s.recv(4096).decode()
+                    if response == "NOFILES":
+                        print(f"[{ip}:{port}] → No shared files.")
+                    else:
+                        print(f"[{ip}:{port}] → Shared Files:")
+                        for file in response.strip().split('\n'):
+                            print(f"   {file}")
+
+            except Exception as e:
+                print(f"[Client] Could not reach peer {peer_info}: {e}")
             ...
 
 
