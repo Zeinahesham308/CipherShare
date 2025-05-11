@@ -4,10 +4,16 @@ import os
 import filehandler
 import time
 from crypto_utils import encrypt_file, hash_file, decrypt_file,hash_password_with_salt
+from crypto_utils import load_and_decrypt_credentials, generate_fernet_key_from_password
+from crypto_utils import encrypt_and_save_credentials
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+from fileshare_peer import FileSharePeer
+import threading
 
 # ... (Constants for ports, network addresses, file chunk size etc.)
 ...
-
+import base64
 
 class FileShareClient:
     def __init__(self):
@@ -16,6 +22,7 @@ class FileShareClient:
         self.rv_socket=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.username = None
         self.session_key = None  # For symmetric encryption with peers
+        self.my_peer_port=None
 
     def connect_to_peer(self, peer_address):
         try:
@@ -25,6 +32,65 @@ class FileShareClient:
         except Exception as e:
             print(f"Error connecting to peer {peer_address}: {e}")
             return False
+    def connect_to_me(self,my_peer_port):
+        host_port_str = "127.0.0.1"+":"+str(my_peer_port)
+        ip, port_str = host_port_str.split(":")
+        address = (ip, int(port_str))
+        try:
+            self.client_socket.connect(address)
+            print(f"Connected to peer at {address}")
+            return True
+        except Exception as e:
+            print(f"Error connecting to peer {address}: {e}")
+            return False
+
+    def broadcast_file_search(self, filename):
+        results = []
+        peer_list = self.get_peer_list()
+
+        for peer_info in peer_list:
+            try:
+                ip_port = peer_info.split(" ")[0]
+                ip, port = ip_port.split(":")
+                port = int(port)
+
+                # Create a temporary connection to each peer
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(1)
+                    s.connect((ip, port))
+                    s.send("SEARCH_DIST".encode())
+                    time.sleep(0.05)
+                    s.send(filename.encode())
+
+                    result = s.recv(4096).decode()
+                    if result != "I DONT HAVE":
+                        print(f"[{ip}:{port}] has:")
+                        for line in result.strip().split('\n'):
+                            print(f"  {line}")
+                            results.append((ip, port, line))  # line = username:relative_path
+                    else:
+                        print(f"[{ip}:{port}] does not have the file.")
+                    s.close()
+            except Exception as e:
+                print(f"[Search] Failed to contact {peer_info}: {e}")
+
+        return results
+
+    def start_local_peer(self,username):
+        # Let OS assign an available port
+        temp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        temp_sock.bind(('localhost', 0))
+        assigned_port = temp_sock.getsockname()[1]
+        temp_sock.close()
+
+        # Now start the peer on that port
+        peer =FileSharePeer(port=assigned_port, username=username)
+        threading.Thread(target=peer.start_peer, daemon=True).start()
+        print(f"[Client] Started local peer on dynamic port {assigned_port}")
+
+        # Save the port for later use (e.g., registration with rendezvous)
+        self.my_peer_port = assigned_port
+
 
     def register_with_rendezvous(self, username, rendezvous_server_ip='127.0.0.1', rendezvous_server_port=9000):
         try:
@@ -32,7 +98,7 @@ class FileShareClient:
             self.rv_socket.connect((rendezvous_server_ip, rendezvous_server_port))
 
             # Send REGISTER message with your port and username
-            message = f"REGISTER {self.client_socket.getsockname()[1]} {username}"
+            message = f"REGISTER {self.my_peer_port} {username}"
             self.rv_socket.send(message.encode())
             self.rv_socket.recv(1024)  # Wait for confirmation
             print(f"[Client] Successfully registered as '{username}' with Rendezvous Server.")
@@ -103,6 +169,22 @@ class FileShareClient:
                 self.username = username
                 self.session_key = crypto_utils.derive_key_from_password(password, salt)
                 self.register_with_rendezvous(self.username)
+                local_salt = os.urandom(16)
+                fernet_key = generate_fernet_key_from_password(password, local_salt)
+
+                data_to_save = {
+                    "username": username,
+                    "salt": salt,
+                    "session_key": base64.b64encode(self.session_key).decode()
+                }
+
+                cred_file = f"client_credentials_{username}.enc"
+                salt_file = f"salt_{username}.bin"
+
+                encrypt_and_save_credentials(cred_file, data_to_save, fernet_key)
+                with open(salt_file, 'wb') as sfile:
+                    sfile.write(local_salt)
+
                 return True
             else:
                 self.username = None
@@ -111,6 +193,90 @@ class FileShareClient:
         except Exception as e:
             print(f"Error during login: {e}")
             return False
+
+    def get_download_path(self,username, filename):
+        user_folder = os.path.join("shared_files", username)
+        os.makedirs(user_folder, exist_ok=True)
+        return os.path.join(user_folder, filename)
+
+    def distributed_download(self,download=True):
+        filename = input("Enter filename to search: ")
+        peers_with_file = self.broadcast_file_search(filename)
+
+        if not peers_with_file:
+            print("No peer has the file.")
+            return
+
+        all_files = []
+        for ip, port, files in peers_with_file:
+            for file in files.strip().split('\n'):
+                all_files.append((ip, port, file))
+
+        print("\nAvailable sources:")
+        for i, (ip, port, file) in enumerate(all_files):
+            print(f"[{i}] {ip}:{port} -> {file}")
+        if not download:
+            return
+        choice = int(input("Select the file number to download from: "))
+        ip, port, selected_file = all_files[choice]
+
+        if ":" in selected_file:
+            filename = selected_file.split(":", 1)[1].split(os.sep)[-1]
+        else:
+            filename = os.path.basename(selected_file)
+
+        download_path = os.path.join("shared_files", self.username)
+        os.makedirs(download_path, exist_ok=True)
+        decrypted_filepath = os.path.join(download_path, filename)
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((ip, port))
+                s.send("DOWNLOAD_DIST".encode())
+                time.sleep(0.1)
+                s.recv(1024)  # ack
+
+                s.send(filename.encode())
+                time.sleep(0.05)
+                s.send(self.session_key)
+
+                reply = s.recv(1024).decode()
+                if reply.startswith("ERROR"):
+                    print("File not found.")
+                    return
+
+                expected_hash = s.recv(1024).decode()
+                s.recv(1024)  # START
+
+                iv = s.recv(16)
+                cipher = Cipher(algorithms.AES(self.session_key), modes.CBC(iv), backend=default_backend())
+                decryptor = cipher.decryptor()
+
+                with open(decrypted_filepath, 'wb') as f:
+                    buffer = b""
+                    while True:
+                        data = s.recv(1024)
+                        if data == b"END_OF_FILE":
+                            break
+                        buffer += data
+                        while len(buffer) >= 16:
+                            chunk = buffer[:16]
+                            buffer = buffer[16:]
+                            decrypted_chunk = decryptor.update(chunk)
+                            f.write(decrypted_chunk)
+
+                    final = decryptor.finalize()
+                    if final:
+                        f.write(final)
+
+            actual_hash = hash_file(decrypted_filepath)
+            if actual_hash != expected_hash:
+                print("[WARNING] File hash mismatch! The file may be corrupted.")
+            else:
+                print("[Client] File downloaded and integrity verified at:", decrypted_filepath)
+
+        except Exception as e:
+            print(f"[Client] Error during download: {e}")
 
     def upload_file(self, filepath):
         """
@@ -314,74 +480,97 @@ class FileShareClient:
 # ... (Client program entry point, user interface loop) ...
 def main():
     FSC = FileShareClient()
-    FSC.connect_to_peer(('127.0.0.1', 5555))
 
-    # Discover peers automatically
-    # available_peers = FSC.discover_peers()
-    # print(f"Available peers: {available_peers}")
+    print("Enter your username:")
+    username = input("Username: ")
 
+    cred_file = f"client_credentials_{username}.enc"
+    salt_file = f"salt_{username}.bin"
 
-    #message=FSC.client_socket.recv(1024).decode()
-    #print(message)
-    choice=''
+    if os.path.exists(cred_file) and os.path.exists(salt_file):
+        print("Found saved credentials. Enter master password to unlock:")
+        master_password = input("Master Password: ")
+
+        with open(salt_file, 'rb') as sfile:
+            local_salt = sfile.read()
+
+        fernet_key = generate_fernet_key_from_password(master_password, local_salt)
+
+        try:
+            creds = load_and_decrypt_credentials(cred_file, fernet_key)
+            FSC.username = creds['username']
+            FSC.session_key = base64.b64decode(creds['session_key'])
+            peer_thread = threading.Thread(target=FSC.start_local_peer,args=(username,), daemon=True)
+            peer_thread.start()
+            time.sleep(1.5)
+            FSC.register_with_rendezvous(FSC.username)
+            print(f"[Auto-login] Welcome back, {FSC.username}")
+        except Exception as e:
+            print(f"Decryption failed: {e}")
+            peer_thread = threading.Thread(target=FSC.start_local_peer,args=(username,), daemon=True)
+            peer_thread.start()
+            time.sleep(1.5)
+    else:
+        print("credentials not found need to login or signup")
+        peer_thread = threading.Thread(target=FSC.start_local_peer, daemon=True)
+        peer_thread.start()
+        time.sleep(1.5)
+    FSC.connect_to_me(FSC.my_peer_port)
+    # ========== MAIN MENU ==========
+    choice = ''
     while choice != 0:
+        print("\n******** HELLO WELCOME TO CIPHERSHARE ********")
+        print(" - Enter Target Number -")
+        print("[1] Login\n[2] Signup\n[3] Upload a File\n[4] Download a File\n[5] List Shared Files\n[6] Search for File\n[7] List Online Peers\n[8] End")
+        choice = int(input())
 
-        print("******** HELLO WELCOME TO CIPHERSHARE  ********  \n - Enter Tagrget number -\n[1]login\n[2]Signup\n[3]Uploading a file\n[4]Downloading a file\n[5]Listing all files\n[6]Searching for a file\n[7]Listing all online peers\n[8]End\n")
-        choice=int(input())
-        if choice==1:
+        if choice == 1:
             if FSC.username:
-                print(f"USER \"{FSC.username}\"  ALREADY LOGGED IN")
-                choice=''
+                print(f"USER \"{FSC.username}\" ALREADY LOGGED IN")
                 continue
-            print("----------------------LOGIN----------------------")
-
-            username=input("ENTER USERNAME : ")
-            password=input("ENTER PASSWORD : ")
-            result=FSC.login_user(username,password)
-            if result:
+            username = input("ENTER USERNAME: ")
+            password = input("ENTER PASSWORD: ")
+            if FSC.login_user(username, password):
                 print("LOGIN SUCCESSFUL!")
-            else :
+            else:
                 print("User info is wrong or user does not exist")
 
-        elif choice== 2:
-            if  FSC.username:
-                print(f"USER {FSC.username}ALREADY LOGGED IN")
-                choice=''
+        elif choice == 2:
+            if FSC.username:
+                print(f"USER {FSC.username} ALREADY LOGGED IN")
                 continue
-            print("----------------------SIGNUP----------------------")
-            username=input("ENTER USERNAME : ")
-            password=input("ENTER PASSWORD : ")
-            result=FSC.register_user(username,password)
-            if result:
-                print("SIGNUP SUCCESSFULY .... YOU WILL NEED TO LOGIN TO CONTINUE")
-            else :
-                print("FAILED SIGNUP TRY ANOTHER USERNAME OR VALID PASSWORD")
+            username = input("ENTER USERNAME: ")
+            password = input("ENTER PASSWORD: ")
+            if FSC.register_user(username, password):
+                print("SIGNUP SUCCESSFUL. Please login to continue.")
+            else:
+                print("FAILED SIGNUP. Try another username or valid password.")
 
         elif choice == 3:
-            print("Enter path of the file to upload: ")
-            filepath=input()
-            normalizedfilepath = filehandler.FileHandler.normalize_path(filepath)
-            FSC.upload_file(normalizedfilepath)
+            filepath = input("Enter path of the file to upload: ")
+            normalized = filehandler.FileHandler.normalize_path(filepath)
+            FSC.upload_file(normalized)
 
         elif choice == 4:
-            print("enter the filename to download ex :  name.pdf.enc")
-            file=input()
-            print("enter the destination where you want to save the file to be downloaded\n example C:\\Users\\zeina\\Desktop\\myfiles\\yourfilename")
-            dest=input()
-            FSC.download_file(file,dest)
+            # file = input("Enter the filename to download (e.g., name.pdf.enc): ")
+            # dest = input("Enter the destination path: ")
+            # FSC.download_file(file, dest)
+            FSC.distributed_download()
 
 
         elif choice == 5:
             FSC.list_shared_files()
 
         elif choice == 6:
-            keyword = input("Enter keyword to search for: ")
-            FSC.search_files(keyword)
+            FSC.distributed_download(False)
         elif choice ==7 :
             FSC.get_peer_list()
 
         elif choice==8:
             break;
+        # elif choice == 9:
+        #     FSC.distributed_download()
+
         else:
             print("Try again and enter a valid number")
         choice = ''

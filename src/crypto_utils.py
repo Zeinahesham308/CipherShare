@@ -1,11 +1,13 @@
 import os
 import hashlib
 import base64
+from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
+import json
 # Hash password with PBKDF2 and random salt
 def hash_password_with_salt(password):
     salt = os.urandom(16)
@@ -167,3 +169,32 @@ def hash_file(filepath):
         while chunk := f.read(4096):
             sha256.update(chunk)
     return sha256.hexdigest()
+
+
+def generate_fernet_key_from_password(password: str, salt: bytes) -> bytes:
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.backends import default_backend
+    import base64
+
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100_000,
+        backend=default_backend()
+    )
+    return base64.urlsafe_b64encode(kdf.derive(password.encode()))
+
+def encrypt_and_save_credentials(file_path, data_dict, fernet_key):
+    f = Fernet(fernet_key)
+    encrypted = f.encrypt(json.dumps(data_dict).encode())
+    with open(file_path, 'wb') as file:
+        file.write(encrypted)
+
+def load_and_decrypt_credentials(file_path, fernet_key):
+    f = Fernet(fernet_key)
+    with open(file_path, 'rb') as file:
+        encrypted_data = file.read()
+    decrypted = f.decrypt(encrypted_data)
+    return json.loads(decrypted.decode())

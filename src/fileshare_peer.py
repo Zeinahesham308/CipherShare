@@ -7,16 +7,18 @@ import  time
 # ... (Data structures for user info, shared files, peer lists etc.)
 ...
 
-
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
 
 class FileSharePeer:
-    def __init__(self, port):
+    def __init__(self, port=0, username=None):
         self.peer_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         self.port = port
         self.host = '0.0.0.0'
         self.users = {} # {username: {hashed_password, salt, ...}} - In-memory for simplicity, consider file-based storage for persistence
         self.shared_files = {}  # {file_id: {filepath, owner_username, ...}} - Track files shared by this peer
         #self.handle_client_connection
+        self.active_username = username
 
 
         # Load users from file if it exists
@@ -28,6 +30,7 @@ class FileSharePeer:
     def start_peer(self):
         self.peer_socket.bind((self.host, self.port))
         self.peer_socket.listen(5) #5connections
+        self.port = self.peer_socket.getsockname()[1]
         print(f"Peer listening on port {self.port}")
         while True:
             client_socket, client_address = self.peer_socket.accept()
@@ -44,6 +47,7 @@ class FileSharePeer:
                 #client_socket.send("Server Waiting for the command".encode())
                 command = client_socket.recv(1024).decode()  # Example - define command structure
                 if command == "REGISTER":
+                    print("LOL")
                     username = client_socket.recv(1024).decode()
                     hashed_password = client_socket.recv(1024).decode()
                     salt = client_socket.recv(1024).decode()
@@ -78,6 +82,7 @@ class FileSharePeer:
 
                     if hashed_password == stored_hash:
                         client_socket.send("Login successful.".encode())
+                        self.active_username = username
                     else:
                         client_socket.send("Invalid credentials.".encode())
 
@@ -188,7 +193,67 @@ class FileSharePeer:
 
 
                     #handle upload
-                    pass
+                elif command == "DOWNLOAD_DIST":
+                    client_socket.send("you can download now...".encode())
+
+                    filename = client_socket.recv(1024).decode()
+                    print(f"file to be downloaded is : {filename}")
+
+                    # 🌟 Receive the session key from client
+                    self.session_key = client_socket.recv(1024)
+                    if len(self.session_key) not in (16, 24, 32):  # AES key lengths
+                        client_socket.send("ERROR: Invalid session key length.".encode())
+                        return
+
+                    filepath = None
+                    for root, dirs, files in os.walk("shared_files"):
+                        if filename in files:
+                            filepath = os.path.join(root, filename)
+                            print(filepath)
+                            break
+
+                    if not filepath or not os.path.exists(filepath):
+                        client_socket.send(f"ERROR: File '{filename}' not found.".encode())
+                        return
+
+                    client_socket.send("OK".encode())  # confirm file is ready
+                    time.sleep(0.05)
+
+                    file_hash = hash_file(filepath)
+                    client_socket.send(file_hash.encode())  # send hash first
+                    print(f"[Server] Sent hash: {file_hash}")
+
+                    time.sleep(0.05)
+                    client_socket.send("START".encode())
+                    print("[Server] Sending file...")
+
+                    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                    from cryptography.hazmat.backends import default_backend
+
+                    with open(filepath, 'rb') as f:
+                        data = f.read()
+
+                    iv = os.urandom(16)
+                    client_socket.send(iv)  # Send IV first
+
+                    cipher = Cipher(algorithms.AES(self.session_key), modes.CBC(iv), backend=default_backend())
+                    encryptor = cipher.encryptor()
+
+                    pad_len = 16 - len(data) % 16
+                    data += bytes([pad_len] * pad_len)
+
+                    encrypted = encryptor.update(data) + encryptor.finalize()
+
+                    for i in range(0, len(encrypted), 1024):
+                        print("#", end='', flush=True)
+                        chunk = encrypted[i:i + 1024]
+                        time.sleep(0.01)
+                        client_socket.sendall(chunk)
+                    client_socket.send(b"END_OF_FILE")
+                    print(f"\n[Server] Sent {len(encrypted)} bytes in chunks.")
+                    print(f"File '{filename}' sent to requester.")
+                    return
+
                 elif command=="LIST":
                     print(f"[Server] Client requested list of shared files.")
                     os.makedirs('shared_files', exist_ok=True)
@@ -229,6 +294,43 @@ class FileSharePeer:
 
 
 
+                elif command == "SEARCH_DIST":
+
+                    keyword = client_socket.recv(1024).decode().strip()
+
+                    print(f"[Server] Received distributed search for: {keyword}")
+                    #print(self.active_username)
+                    if not self.active_username:
+                        client_socket.send("I DONT HAVE".encode())
+                        return
+
+                    peer_folder = os.path.join("shared_files", self.active_username)
+
+                    if not os.path.exists(peer_folder):
+                        client_socket.send("I DONT HAVE".encode())
+
+                        return
+
+                    matches = []
+
+                    for root, dirs, files in os.walk(peer_folder):
+
+                        for file in files:
+
+                            if keyword.lower() in file.lower():
+                                relative_path = os.path.relpath(os.path.join(root, file), 'shared_files')
+
+                                matches.append(relative_path)
+
+                    response = "\n".join(matches) if matches else "I DONT HAVE"
+
+                    client_socket.send(response.encode())
+                    return
+
+
+
+
+
         except Exception as e:
             print(f"Error handling client {client_address}: {e}")
         finally:
@@ -236,11 +338,10 @@ class FileSharePeer:
 
 
 def main():
-    FSP = FileSharePeer(5555)
+    FSP = FileSharePeer(port=0)
     FSP.start_peer()
 if __name__ == '__main__':
     main()
-
 
 
 
